@@ -1,0 +1,18 @@
+{
+  "endpoint": "https://api.deepseek.com/chat/completions",
+  "model": "deepseek-flash",
+  "apiKey": "sk-ce7b4283784a4e2cb594e06a1d0bf3bb",
+  "maxTokens": 600,
+  "attachImage": false,
+  "useCache": true,
+  "streamAsk": true,
+  "consensusSamples": 1,
+  "temperature": 0.1,
+  "autoSave": false,
+  "letterMode": true,
+  "clickThrough": true,
+  "hideStatusItem": true,
+  "revealMin": 1.0,
+  "revealMax": 2.5,
+  "ocrLanguages": ["en-US", "es-ES"]
+}
