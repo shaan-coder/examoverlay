@@ -1,6 +1,6 @@
 {
-  "version": "3.6",
-  "url": "https://github.com/shaan-coder/examoverlay/releases/download/v3.6/ExamOverlay-3.6.zip",
-  "notes": "Update test 5",
-  "sig": "KplvaNmjUHu9R8nX1eaS/Ijp855ALl6pG3JteuOw48gjQo8xZnjVYvAHohohfWQvlXIZ7Zx8cJ3ED/IskX7DAQ=="
+  "version": "3.7",
+  "url": "https://github.com/shaan-coder/examoverlay/releases/download/v3.7/ExamOverlay-3.7.zip",
+  "notes": "Fixes batch truncation on long pages",
+  "sig": "lJxKlkgAfxLI68AzLfKjoqDVbV3rN7l+MWA3DabFEiRRyKdcbNv4qegxF31RoTiNFCl9H+c2OIYMlaFlu7PrDw=="
 }
