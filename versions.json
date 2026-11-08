@@ -1,6 +1,6 @@
 {
-  "version": "3.8",
-  "url": "https://github.com/shaan-coder/examoverlay/releases/download/v3.8/ExamOverlay-3.8.zip",
-  "notes": "Add study report builder",
-  "sig": "jIWL38A+HczlLHoNuC2BNeOZkl5bEzkuWOWSTcN/EzBQr/36JAkWSAQtBkqInLd9Pq8lGq34PgZdvxNb/8maAw=="
+  "version": "3.9",
+  "url": "https://github.com/shaan-coder/examoverlay/releases/download/v3.9/ExamOverlay-3.9.zip",
+  "notes": "Report shows the question stem, not the whole screen",
+  "sig": "ZiclqGo+0TyxHuatK3tW3Gv2Z0ZxVcIZHra02IG6xbs2iXlBIExNkmy42jKhh9yHs9z2Jpt3FeNkUu2YITcTDg=="
 }

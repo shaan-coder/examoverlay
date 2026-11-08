@@ -9,6 +9,19 @@ enum StudyReport {
             .replacingOccurrences(of: ">", with: "&gt;")
     }
 
+    private static func stem(_ raw: String) -> String {
+        let lines = raw.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        var picked: [String] = []
+        for l in lines.reversed() {
+            if l.isEmpty { continue }
+            if l.range(of: #"^[A-Fa-f][\.\)]\s"#, options: .regularExpression) != nil { continue }
+            if l.count < 12 { continue }
+            picked.append(l)
+            if picked.count == 2 { break }
+        }
+        return String(picked.reversed().joined(separator: " ").suffix(240))
+    }
+
     @MainActor
     static func build() {
         let since = Calendar.current.startOfDay(for: Date())
@@ -23,7 +36,7 @@ enum StudyReport {
             rows.append((o["letter"] as? String ?? "?",
                         a,
                         o["confidence"] as? Double ?? 0,
-                        String((o["q"] as? String ?? "").suffix(260))))
+                        stem(o["q"] as? String ?? "")))
         }
         guard !rows.isEmpty else {
             let al = NSAlert()
