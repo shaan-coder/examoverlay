@@ -60,6 +60,7 @@ enum Update {
     }
 
     private static func install(_ r: Release) {
+        Log.write("update: install \(r.version) from \(r.url.absoluteString)")
         var req = URLRequest(url: r.url)
         req.timeoutInterval = 120
         URLSession.shared.downloadTask(with: req) { tmp, _, err in
@@ -68,10 +69,13 @@ enum Update {
                     alert("Download failed", err?.localizedDescription ?? "")
                     return
                 }
+                Log.write("update: downloaded \(data.count) bytes")
                 guard verify(data, r.sig) else {
+                    Log.write("update: signature failed")
                     alert("Bad signature", "Update not installed.")
                     return
                 }
+                Log.write("update: signature ok, staging")
                 stage(data)
             }
         }.resume()
@@ -118,7 +122,8 @@ enum Update {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/bash")
         p.arguments = [script.path]
-        try? p.run()
+        Log.write("update: script \(script.path), dest \(dest)")
+        do { try p.run() } catch { Log.write("update: spawn failed \(error)") }
         NSApp.terminate(nil)
     }
 }
