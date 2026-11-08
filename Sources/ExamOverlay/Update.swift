@@ -100,7 +100,8 @@ enum Update {
         let dest = Bundle.main.bundlePath
         let body = """
         #!/bin/bash
-        set -u
+        exec > /tmp/examoverlay-update.log 2>&1
+        set -x
         sleep 2
         cd "\(dir)" || exit 1
         /usr/bin/unzip -q -o new.zip || exit 1
@@ -121,10 +122,10 @@ enum Update {
                                               ofItemAtPath: script.path)
 
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = [script.path]
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "nohup /bin/bash '\(script.path)' > /tmp/examoverlay-update.log 2>&1 &"]
         Log.write("update: script \(script.path), dest \(dest)")
         do { try p.run() } catch { Log.write("update: spawn failed \(error)") }
-        NSApp.terminate(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.terminate(nil) }
     }
 }
