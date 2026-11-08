@@ -19,6 +19,7 @@ enum Update {
 
     static func check(quiet: Bool) {
         var req = URLRequest(url: manifest)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
         req.timeoutInterval = 15
         req.setValue("curl/8.7.1", forHTTPHeaderField: "User-Agent")
         URLSession.shared.dataTask(with: req) { data, _, err in

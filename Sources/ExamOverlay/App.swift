@@ -269,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func doUpdate() { Update.check(quiet: false) }
     @objc private func doAbout() {
         let al = NSAlert()
-        al.messageText = "ExamOverlay 3.0"
+        al.messageText = "ExamOverlay \(Update.current)"
         al.informativeText = "Screen capture, OCR, and one key."
         al.runModal()
     }
