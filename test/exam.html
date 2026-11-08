@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Unit 4 Practice</title>
+<style>
+body{margin:0;font:16px/1.5 -apple-system,Helvetica,sans-serif;background:#fff;color:#111}
+header{display:flex;justify-content:space-between;padding:14px 28px;border-bottom:1px solid #ddd;font-size:13px;color:#555}
+main{max-width:760px;margin:34px auto;padding:0 28px}
+.stim{border-left:3px solid #ccc;padding:4px 0 4px 16px;margin-bottom:22px;font-size:15px;color:#222}
+.stem{font-weight:600;margin-bottom:16px}
+label{display:block;padding:10px 14px;border:1px solid #ddd;border-radius:6px;margin-bottom:9px;cursor:pointer}
+label:hover{background:#fafafa}
+label.sel{border-color:#333;background:#f4f4f4}
+input{display:none}
+nav{margin-top:26px;display:flex;gap:10px}
+button{padding:8px 18px;font-size:14px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
+#key{position:fixed;right:0;top:0;bottom:0;width:230px;background:#111;color:#eee;font:12px/1.7 Menlo,monospace;padding:16px;overflow:auto;display:none}
+#grid{position:fixed;inset:0;background:#fff;padding:30px;display:none;overflow:auto}
+#grid b{font:600 13px Menlo,monospace}
+table{border-collapse:collapse;font:12px Menlo,monospace;margin-top:14px}
+td,th{border:1px solid #ccc;padding:5px 9px;text-align:center}
+.ok{background:#e7f6e7}.bad{background:#fbe9e9}
+svg{display:block;margin:0 auto}
+</style>
+<header><span>AP World History · Unit 4</span><span id="c"></span></header>
+<main id="q"></main>
+<div id="key"></div>
+<div id="grid"></div>
+<script>
+const Q=[
+{s:`"The curse of the pharaohs fell upon the land: no vegetation, locusts devoured the fields, and the grinding stone stood still."`,q:"The passage most directly reflects which role of rulers?",o:["Maintaining and expanding agricultural production","Codifying religious law","Regulating long-distance trade","Standardizing weights and measures"],k:0},
+{s:`<svg width="420" height="180"><rect width="420" height="180" fill="#fafafa"/><g fill="#777"><rect x="30" y="120" width="42" height="40"/><rect x="95" y="95" width="42" height="65"/><rect x="160" y="70" width="42" height="90"/><rect x="225" y="40" width="42" height="120"/><rect x="290" y="25" width="42" height="135"/></g><g font-size="11" fill="#555" text-anchor="middle"><text x="51" y="172">1500</text><text x="116" y="172">1600</text><text x="181" y="172">1700</text><text x="246" y="172">1750</text><text x="311" y="172">1800</text></g><text x="210" y="16" font-size="11" fill="#333" text-anchor="middle">Sugar produced in the Caribbean (thousands of tons)</text></svg>`,q:"Which development most directly explains the trend shown?",o:["The Columbian Exchange and plantation agriculture","The Industrial Revolution","The collapse of the Silk Road","The decline of the Ottoman Empire"],k:0},
+{s:`"When the colonial attempt to destroy Indigenous religion failed, the old gods took shelter inside the new faith: rituals continued under a Catholic disguise."`,q:"The passage best illustrates which process?",o:["Syncretism as a form of cultural resistance","Total assimilation to European culture","The abolition of Indigenous belief","The spread of Protestantism"],k:0},
+{s:`<svg width="380" height="200"><rect width="380" height="200" fill="#f7f9fb"/><path d="M20 60 Q120 40 200 90 T360 120" stroke="#8aa" fill="none" stroke-width="2"/><circle cx="90" cy="55" r="5" fill="#c33"/><circle cx="250" cy="105" r="5" fill="#c33"/><text x="20" y="185" font-size="11" fill="#555">Atlantic routes carrying enslaved Africans, 1500–1800</text></svg>`,q:"The routes shown carried people primarily to which destination?",o:["The Americas","Southeast Asia","Eastern Europe","West Africa"],k:0},
+{s:`"Indians in South Africa were called 'coolies', a term attached to bonded labourers who came on five-year contracts."`,q:"The labor system described is best characterized as",o:["Coerced and semi-coerced migration within a global capitalist economy","Free wage labor","Slavery by hereditary descent","Military conscription"],k:0},
+{s:``,q:"Which development between 1450 and 1750 most directly enabled the Columbian Exchange?",o:["New maritime technology and Atlantic crossings","The fall of Constantinople","The Mughal conquest of India","The Protestant Reformation"],k:0},
+{s:`<svg width="400" height="170"><rect width="400" height="170" fill="#fafafa"/><g font-size="11" fill="#444"><text x="20" y="30">Silver extracted, Potosí</text><rect x="170" y="20" width="180" height="14" fill="#999"/><text x="20" y="60">Silver arriving, Seville</text><rect x="170" y="50" width="140" height="14" fill="#bbb"/><text x="20" y="90">Silver reaching Ming China</text><rect x="170" y="80" width="110" height="14" fill="#ccc"/></g><text x="20" y="130" font-size="11" fill="#666">Relative volume, sixteenth century</text></svg>`,q:"The flow shown most directly contributed to",o:["Inflation and the growth of a global trading network","The decline of Chinese demand for silver","The end of the transatlantic slave trade","Industrialization in Japan"],k:0},
+{s:`"The people of the Andean highlands continued to venerate the earth mother while attending Mass on Sundays."`,q:"This pattern is evidence of",o:["Religious syncretism under colonial rule","Successful eradication of Indigenous religion","Rejection of Catholicism by the elite","The absence of missionary activity"],k:0},
+{s:``,q:"Which state most directly challenged Portuguese dominance in the Indian Ocean in the seventeenth century?",o:["The Dutch Republic","The Ottoman Empire","The Kingdom of Kongo","The Aztec Empire"],k:0},
+{s:`<svg width="360" height="180"><rect width="360" height="180" fill="#fafafa"/><circle cx="120" cy="90" r="60" fill="none" stroke="#888" stroke-width="1.5"/><circle cx="120" cy="90" r="3" fill="#333"/><text x="120" y="165" font-size="11" fill="#555" text-anchor="middle">Trading-post empire</text><circle cx="270" cy="90" r="60" fill="none" stroke="#bbb" stroke-dasharray="4 4"/><text x="270" y="165" font-size="11" fill="#999" text-anchor="middle">Territorial empire</text></svg>`,q:"Which power is best described by the solid circle?",o:["Portugal","Spain","Russia","France"],k:0},
+{s:`"The encomienda granted a Spaniard the labor of a group of Indians in return for instruction in the faith."`,q:"The encomienda most closely resembled which earlier system?",o:["Feudal serfdom with a religious obligation","Chattel slavery","The Mughal zamindari","Chinese corvée"],k:0},
+{s:``,q:"The Ottoman devshirme system most directly produced",o:["An administrative and military elite loyal to the sultan","A hereditary landed aristocracy","A merchant class independent of the state","A religious council of scholars"],k:0},
+{s:`<svg width="400" height="150"><rect width="400" height="150" fill="#fafafa"/><g fill="#8aa"><rect x="40" y="90" width="60" height="40"/><rect x="140" y="60" width="60" height="70"/><rect x="240" y="30" width="60" height="100"/></g><g font-size="11" fill="#444" text-anchor="middle"><text x="70" y="145">1700</text><text x="170" y="145">1750</text><text x="270" y="145">1800</text></g><text x="20" y="18" font-size="11" fill="#555">Tea imported to Britain</text></svg>`,q:"The trend is best explained by",o:["Rising consumer demand and the expansion of global trade","A collapse in domestic production","The end of mercantilism","Declining urban populations"],k:0},
+{s:`"The court moved from the old capital to a new one built on a grid, with wide avenues and a monumental palace."`,q:"The description best fits which ruler?",o:["Akbar","Peter the Great","Suleiman the Magnificent","Louis XIV"],k:0},
+{s:``,q:"The Thirty Years' War concluded with which settlement?",o:["The Peace of Westphalia","The Treaty of Tordesillas","The Peace of Augsburg","The Edict of Nantes"],k:0},
+{s:`<svg width="380" height="170"><rect width="380" height="170" fill="#fbfbfb"/><g font-size="11" fill="#333"><rect x="30" y="40" width="130" height="90" fill="#eee" stroke="#999"/><text x="95" y="90" text-anchor="middle">Europe</text><rect x="220" y="40" width="130" height="90" fill="#f6efe6" stroke="#999"/><text x="285" y="90" text-anchor="middle">Americas</text></g><path d="M160 70 L220 70" stroke="#c33" stroke-width="2"/><path d="M220 105 L160 105" stroke="#36c" stroke-width="2"/><text x="190" y="64" font-size="10" fill="#c33" text-anchor="middle">goods</text><text x="190" y="120" font-size="10" fill="#36c" text-anchor="middle">raw materials</text></svg>`,q:"The relationship shown is best described as",o:["Mercantilism","Laissez-faire","Feudalism","Manorialism"],k:0},
+{s:`"The king's authority came to rest on a standing army, a professional bureaucracy and the cultivation of court ritual."`,q:"These are features of",o:["Absolutism","Constitutional monarchy","Republicanism","Feudalism"],k:0},
+{s:``,q:"Which innovation most directly enabled European expansion into the Indian Ocean?",o:["The caravel and improved navigation","The steam engine","The telegraph","The railroad"],k:0},
+{s:`<svg width="360" height="160"><rect width="360" height="160" fill="#fafafa"/><g font-size="11" fill="#555"><rect x="40" y="110" width="40" height="25" fill="#aaa"/><rect x="100" y="95" width="40" height="40" fill="#aaa"/><rect x="160" y="80" width="40" height="55" fill="#aaa"/><rect x="220" y="60" width="40" height="75" fill="#aaa"/><text x="140" y="152" text-anchor="middle">Population of Lima</text></g></svg>`,q:"The growth shown was most dependent on",o:["Mining wealth and coerced labor","Rice cultivation","The abolition of the encomienda","Declining silver imports"],k:0},
+{s:`"Both the Mughal and Ottoman states collected land revenue through intermediaries who kept a share."`,q:"This shared feature is best described as",o:["A system of revenue farming","Centralized direct taxation","A merchant oligarchy","Industrial capitalism"],k:0},
+{s:``,q:"Which development most directly weakened the Manchu Qing state by 1800?",o:["Population growth outpacing agricultural output","The Meiji Restoration","The Opium Wars","The Taiping Rebellion"],k:0},
+{s:`"Silver from the Americas passed through Manila into Chinese markets."`,q:"The route described is best identified as part of",o:["The global silver trade","The Silk Road","The trans-Saharan trade","The Indian Ocean spice trade"],k:0},
+{s:``,q:"The Atlantic slave trade most directly shaped which demographic outcome in the Americas?",o:["A large African-descended population in the Caribbean and Brazil","The disappearance of Indigenous populations","Rapid European settlement of the interior","The decline of plantation agriculture"],k:0},
+{s:`<svg width="340" height="150"><rect width="340" height="150" fill="#fafafa"/><g font-size="11" fill="#444"><text x="20" y="40">Gunpowder weapons adopted</text><text x="20" y="70">Centralized armies formed</text><text x="20" y="100">Nomadic power declined</text></g><g stroke="#bbb"><path d="M200 35 L215 35"/><path d="M200 65 L215 65"/><path d="M200 95 L215 95"/></g></svg>`,q:"This sequence best describes consequences of",o:["The gunpowder empires","The Crusades","The Black Death","The Renaissance"],k:0}
+];
+Q.forEach(x=>{
+  const order=[0,1,2,3];
+  for(let n=order.length-1;n>0;n--){const j=Math.floor(Math.random()*(n+1));[order[n],order[j]]=[order[j],order[n]];}
+  const old=x.k;
+  x.o=order.map(n=>x.o[n]);
+  x.k=order.indexOf(old);
+});
+let i=0, sel=JSON.parse(localStorage.getItem('sel')||'[]');
+const q=document.getElementById('q'),c=document.getElementById('c');
+function draw(){
+c.textContent=`${i+1} of ${Q.length}`;
+q.innerHTML=`<div class="stim">${Q[i].s||''}</div><div class="stem">${i+1}. ${Q[i].q}</div>`+
+Q[i].o.map((t,n)=>`<label class="${sel[i]===n?'sel':''}"><input type="radio" name="o"><b>${'ABCD'[n]}.</b> ${t}</label>`).join('')+
+`<nav><button id="p">Back</button><button id="n">${i===Q.length-1?'Finish':'Next'}</button></nav>`;
+[...q.querySelectorAll('label')].forEach((l,n)=>l.onclick=()=>{sel[i]=n;localStorage.setItem('sel',JSON.stringify(sel));draw();});
+document.getElementById('p').disabled=i===0;
+document.getElementById('p').onclick=()=>{i--;draw();};
+document.getElementById('n').onclick=()=>{i<Q.length-1?(i++,draw()):results();};
+}
+function results(){
+let rows=Q.map((x,n)=>`<tr><td>${n+1}</td><td class="${sel[n]===x.k?'ok':'bad'}">${sel[n]!==undefined?'ABCD'[sel[n]]:'—'}</td><td>${'ABCD'[x.k]}</td></tr>`).join('');
+let right=Q.filter((x,n)=>sel[n]===x.k).length;
+document.getElementById('grid').innerHTML=`<b>${right}/${Q.length} correct (${Math.round(right/Q.length*100)}%)</b><table><tr><th>#</th><th>you</th><th>key</th></tr>${rows}</table><p><button onclick="location.reload()">Restart</button></p>`;
+document.getElementById('grid').style.display='block';
+}
+addEventListener('keydown',e=>{
+if(e.key==='k'){const k=document.getElementById('key');k.style.display=k.style.display==='block'?'none':'block';
+k.innerHTML=Q.map((x,n)=>`${n+1}. ${'ABCD'[x.k]}`).join('<br>');}
+if(e.key==='r')results();
+});
+draw();
+</script>

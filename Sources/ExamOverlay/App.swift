@@ -145,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         add("Provider health", #selector(doHealth))
         m.addItem(.separator())
         add("Check for updates", #selector(doUpdate))
+        add("Build study report", #selector(doReport))
         add("About ExamOverlay", #selector(doAbout))
         add("Export log", #selector(doLog))
         add("Cycle format", #selector(doFormat))
@@ -267,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func doEliminate() { eliminate() }
     @objc private func doExplain() { explain() }
     @objc private func doUpdate() { Update.check(quiet: false) }
+    @objc private func doReport() { StudyReport.build() }
     @objc private func doAbout() {
         let al = NSAlert()
         al.messageText = "ExamOverlay \(Update.current)"
@@ -355,6 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keys.add(UInt32(kVK_ANSI_B), mod) { [weak self] in Task { @MainActor in self?.batch() } }
         keys.add(UInt32(kVK_ANSI_E), mod) { [weak self] in Task { @MainActor in self?.eliminate() } }
         keys.add(UInt32(kVK_ANSI_G), mod) { [weak self] in Task { @MainActor in self?.explain() } }
+        keys.add(UInt32(kVK_ANSI_T), mod) { [weak self] in Task { @MainActor in self?.doReport() } }
         keys.add(UInt32(kVK_ANSI_Y), mod) { [weak self] in Task { @MainActor in self?.doReview() } }
         keys.add(UInt32(kVK_ANSI_U), mod) { [weak self] in
             Task { @MainActor in self?.togglePin() }

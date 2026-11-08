@@ -144,6 +144,7 @@ row("Copy answer", "⌃⌥⌘C")
 row("Eliminate two options", "⌃⌥⌘E")
                 row("Explain current answer", "⌃⌥⌘G")
                 row("Review session", "⌃⌥⌘Y")
+                row("Build study report", "⌃⌥⌘T")
                 row("Ask", "⌃⌥⌘P")
 row("Panic — hide and cancel", "⌃⌥⌘X")
 }

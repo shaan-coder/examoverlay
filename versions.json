@@ -1,6 +1,6 @@
 {
-  "version": "3.7",
-  "url": "https://github.com/shaan-coder/examoverlay/releases/download/v3.7/ExamOverlay-3.7.zip",
-  "notes": "Fixes batch truncation on long pages",
-  "sig": "lJxKlkgAfxLI68AzLfKjoqDVbV3rN7l+MWA3DabFEiRRyKdcbNv4qegxF31RoTiNFCl9H+c2OIYMlaFlu7PrDw=="
+  "version": "3.8",
+  "url": "https://github.com/shaan-coder/examoverlay/releases/download/v3.8/ExamOverlay-3.8.zip",
+  "notes": "Add study report builder",
+  "sig": "jIWL38A+HczlLHoNuC2BNeOZkl5bEzkuWOWSTcN/EzBQr/36JAkWSAQtBkqInLd9Pq8lGq34PgZdvxNb/8maAw=="
 }
