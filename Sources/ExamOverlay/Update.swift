@@ -96,6 +96,7 @@ enum Update {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try? zip.write(to: dir.appendingPathComponent("new.zip"))
 
+        let dirPath = dir.path(percentEncoded: false)
         let script = dir.appendingPathComponent("apply.sh")
         let dest = Bundle.main.bundlePath
         let body = """
@@ -103,10 +104,10 @@ enum Update {
         exec > /tmp/examoverlay-update.log 2>&1
         set -x
         sleep 2
-        cd "\(dir)" || exit 1
+        cd "\(dirPath)" || exit 1
         /usr/bin/unzip -q -o new.zip || exit 1
-        APP="\(dir)/ExamOverlay.app"
-        [ -d "$APP" ] || APP="\(dir)/build/ExamOverlay.app"
+        APP="\(dirPath)/ExamOverlay.app"
+        [ -d "$APP" ] || APP="\(dirPath)/build/ExamOverlay.app"
         [ -d "$APP" ] || exit 1
         DEST="\(dest)"
         TMP="$DEST.new"
