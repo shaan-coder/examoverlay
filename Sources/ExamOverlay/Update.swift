@@ -95,13 +95,21 @@ enum Update {
         let dest = Bundle.main.bundlePath
         let body = """
         #!/bin/bash
+        set -u
         sleep 2
-        cd "\(dir)"
-        /usr/bin/unzip -q -o new.zip
-        rm -rf "\(dest)"
-        cp -R "\(dir)/ExamOverlay.app" "\(dest)"
-        xattr -dr com.apple.quarantine "\(dest)"
-        open "\(dest)"
+        cd "\(dir)" || exit 1
+        /usr/bin/unzip -q -o new.zip || exit 1
+        APP="\(dir)/ExamOverlay.app"
+        [ -d "$APP" ] || APP="\(dir)/build/ExamOverlay.app"
+        [ -d "$APP" ] || exit 1
+        DEST="\(dest)"
+        TMP="$DEST.new"
+        rm -rf "$TMP"
+        cp -R "$APP" "$TMP" || exit 1
+        xattr -dr com.apple.quarantine "$TMP" 2>/dev/null
+        rm -rf "$DEST"
+        mv "$TMP" "$DEST"
+        open "$DEST"
         """
         try? body.write(to: script, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o755],
