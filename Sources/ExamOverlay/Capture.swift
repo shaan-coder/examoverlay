@@ -13,14 +13,63 @@ enum Capture {
         }
     }
 
+    static var mouse: CGPoint {
+        CGEvent(source: nil)?.location ?? .zero
+    }
+
+    static func warp(_ p: CGPoint) {
+        CGWarpMouseCursorPosition(p)
+    }
+
+    static func scroll(_ dy: Int32) {
+        guard let src = CGEventSource(stateID: .hidSystemState) else { return }
+        CGEvent(scrollWheelEvent2Source: src, units: .pixel, wheelCount: 1,
+                wheel1: dy, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+    }
+
+    static func type(_ text: String) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        for ch in text {
+            var unit = Array(String(ch).utf16)
+            for down in [true, false] {
+                let e = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: down)
+                e?.keyboardSetUnicodeString(stringLength: unit.count, unicodeString: &unit)
+                e?.post(tap: .cghidEventTap)
+                usleep(12_000)
+            }
+        }
+    }
+
+    static func glide(from a: CGPoint, to b: CGPoint, via: CGPoint? = nil, seconds: Double = 0.26) {
+        if let v = via {
+            glide(from: a, to: v, seconds: seconds * 0.55)
+            glide(from: v, to: b, seconds: seconds * 0.45)
+            return
+        }
+        let steps = max(8, Int(seconds * 120))
+        for i in 1...steps {
+            let t = Double(i) / Double(steps)
+            // bell-shaped velocity: integral of a raised cosine, ease-in then ease-out
+            let e = 0.5 - 0.5 * cos(Double.pi * t)
+            let p = CGPoint(x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e)
+            warp(p)
+            usleep(UInt32((seconds * 1_000_000) / Double(steps)))
+        }
+    }
+
     static func click(pixel: CGPoint, scale: CGFloat) {
         let o = origin
-        let p = CGPoint(x: o.x + pixel.x / scale, y: o.y + pixel.y / scale)
-        CGWarpMouseCursorPosition(p)
-        CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: p, mouseButton: .left)?
-            .post(tap: .cghidEventTap)
-        CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?
-            .post(tap: .cghidEventTap)
+        let p = CGPoint(x: pixel.x / scale + o.x, y: pixel.y / scale + o.y)
+        let back = mouse
+        glide(from: back, to: p, via: Auto.arc(back, p))
+        warp(p)
+        usleep(40_000)
+        let src = CGEventSource(stateID: .hidSystemState)
+        CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+                mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+        usleep(35_000)
+        CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,
+                mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
 
     static func screen() async -> (image: CGImage, scale: CGFloat)? {

@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastText = ""
     private var batchRows: [Model.BatchItem] = []
     private var batchIndex = -1
+    private var auto = false
+    private var autoDry = false
+    private var lastCommit = Date.distantPast
     private var pinnedText = ""
     private var sessionStart = Date()
     private var qStart = Date()
@@ -145,6 +148,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         add("Provider health", #selector(doHealth))
         m.addItem(.separator())
         add("Check for updates", #selector(doUpdate))
+        add("Autopilot", #selector(doAuto))
+        add("Dry run", #selector(doDry))
         add("Build study report", #selector(doReport))
         add("About ExamOverlay", #selector(doAbout))
         add("Export log", #selector(doLog))
@@ -268,6 +273,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func doEliminate() { eliminate() }
     @objc private func doExplain() { explain() }
     @objc private func doUpdate() { Update.check(quiet: false) }
+    @objc private func doAuto() { autoStart() }
+    @objc private func doDry() { autoDry.toggle(); flash(autoDry ? "dry run on" : "dry run off") }
     @objc private func doReport() { StudyReport.build() }
     @objc private func doAbout() {
         let al = NSAlert()
@@ -357,6 +364,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keys.add(UInt32(kVK_ANSI_B), mod) { [weak self] in Task { @MainActor in self?.batch() } }
         keys.add(UInt32(kVK_ANSI_E), mod) { [weak self] in Task { @MainActor in self?.eliminate() } }
         keys.add(UInt32(kVK_ANSI_G), mod) { [weak self] in Task { @MainActor in self?.explain() } }
+        keys.add(UInt32(kVK_ANSI_9), 0) { [weak self] in Task { @MainActor in self?.autoStatusToggle() } }
+        keys.add(UInt32(kVK_ANSI_A), mod) { [weak self] in Task { @MainActor in self?.doAuto() } }
+        keys.add(UInt32(kVK_ANSI_D), mod) { [weak self] in Task { @MainActor in self?.doDry() } }
         keys.add(UInt32(kVK_ANSI_T), mod) { [weak self] in Task { @MainActor in self?.doReport() } }
         keys.add(UInt32(kVK_ANSI_Y), mod) { [weak self] in Task { @MainActor in self?.doReview() } }
         keys.add(UInt32(kVK_ANSI_U), mod) { [weak self] in
@@ -523,6 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.text = "…"
         state.letter = ""
         state.shaky = false
+        if auto { autoStop("interrupted") }
         panel.orderFrontRegardless()
         task = Task { @MainActor in
             if let q = ask { await self.doAsk(g, q) } else { await self.doSolve(g, clipboard) }
@@ -538,10 +549,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return nil
         }
         guard let shot = await Capture.screen() else { set(g, "capture failed"); return nil }
-        let (ocr, bx) = Capture.text(in: shot.image, languages: config.ocrLanguages)
-        boxes = bx
         scale = shot.scale
         lastImage = shot.image
+        var ocr = ""
+        var bx: [(String, CGRect)] = []
+        if config.axText, let ax = AXReader.read(scale: shot.scale) {
+            ocr = ax.0
+            bx = ax.1
+            Log.write("ax tree boxes=\(bx.count)")
+        } else {
+            let o = Capture.text(in: shot.image, languages: config.ocrLanguages)
+            ocr = o.0
+            bx = o.1
+        }
+        boxes = bx
         let text = ocr.trimmingCharacters(in: .whitespacesAndNewlines)
         prevText = lastText
         lastText = text
@@ -677,6 +698,149 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if Task.isCancelled { return }
             set(g, describe(error))
         }
+    }
+
+    private func autoSay(_ t: String) {
+        guard state.autoStatusOn else { return }
+        state.autoStatus = t
+    }
+
+    private func autoStatusToggle() {
+        guard auto else { flash("only in autopilot"); return }
+        state.autoStatusOn.toggle()
+        state.autoStatus = state.autoStatusOn ? "idle" : ""
+    }
+
+    private func autoStart() {
+        guard !auto else { autoStop("autopilot off"); return }
+        guard !state.busy else { return }
+        auto = true
+        gen += 1
+        let g = gen
+        state.auto = true
+        Log.write("auto: start dry=\(autoDry)")
+        task = Task { @MainActor in await self.autoLoop(g) }
+    }
+
+    private func autoStop(_ why: String = "") {
+        guard auto else { return }
+        auto = false
+        state.auto = false
+        state.autoWait = ""
+        Log.write("auto: stop \(why)")
+        if !why.isEmpty { flash(why) }
+    }
+
+    private func autoLoop(_ g: Int) async {
+        var steps = 0
+        var low = 0
+        var prev = ""
+        while auto, g == gen, steps < config.autoMaxSteps {
+            autoSay("reading screen")
+            guard let r = await grab(g) else { autoStop("capture failed"); return }
+            let text = r.text
+            if !prev.isEmpty, overlap(prev, text) > 0.92, steps > 0 {
+                if let b = Auto.button(boxes, Auto.advance) {
+                    Log.write("auto: page static, clicking advance")
+                    Capture.click(pixel: jitter(b), scale: scale)
+                    try? await Task.sleep(nanoseconds: 1_400_000_000)
+                    prev = text
+                    continue
+                }
+            }
+            prev = text
+
+            autoSay("thinking")
+            let estimate = Auto.dwell(chars: text.count, confidence: 0.8) * config.autoDwellScale
+            state.autoWait = String(format: "%.1fs", estimate)
+            try? await Task.sleep(nanoseconds: UInt64(estimate * 1_000_000_000))
+            guard auto, g == gen else { return }
+            state.autoWait = ""
+
+            let raw: String
+            do {
+                raw = try await Model.solve(text, image: lastImage, config, history: "")
+            } catch {
+                if Task.isCancelled { return }
+                Log.write("auto: solve failed \(error)")
+                set(g, describe(error))
+                autoStop("solve failed")
+                return
+            }
+            guard auto, g == gen else { return }
+            let reply = parse(raw)
+            Log.write("auto: \(reply.mode) \(reply.letter ?? "-") conf \(reply.confidence ?? 0)")
+
+            if (reply.confidence ?? 1) < config.autoStopConfidence {
+                low += 1
+                if low >= 2 { set(g, "auto paused — low confidence"); autoStop("low confidence"); return }
+            } else { low = 0 }
+
+            autoSay("answering")
+            if reply.mode == "mcq",
+               let t = Resolve.target(answer: reply.answer, letter: reply.letter, boxes: boxes) {
+                if Auto.wantsWrong(confidence: reply.confidence ?? 1, isLast: false),
+                   let alt = Auto.decoy(than: reply.letter, letters: lastLabels.map { $0.0 }),
+                   let at = Resolve.target(answer: "", letter: alt, boxes: boxes) {
+                    Log.write("auto: decoy \(alt)")
+                    autoSay("wrong answer \(alt), correcting")
+                    if !autoDry {
+                        Capture.warp(jitter(at.box))
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        Capture.click(pixel: jitter(at.box), scale: scale)
+                    }
+                    lastCommit = Date()
+                    try? await Task.sleep(nanoseconds: UInt64(Double.random(in: 1.4...3.0) * 1_000_000_000))
+                }
+                Log.write("auto: click \(t.tier)")
+                autoSay("clicking \(reply.letter ?? "?")")
+                if !autoDry {
+                    Capture.warp(jitter(t.box))
+                    try? await Task.sleep(nanoseconds: UInt64(Double.random(in: 0.4...0.9) * 1_000_000_000))
+                    Capture.click(pixel: jitter(t.box), scale: scale)
+                }
+                lastCommit = Date()
+            } else if reply.mode != "mcq" {
+                let stemY = boxes.first?.1.maxY ?? 0
+                if let blankBox = Auto.blank(boxes, below: stemY) {
+                    if !autoDry { Capture.click(pixel: jitter(blankBox), scale: scale) }
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    if !autoDry { Capture.type(String(reply.answer.prefix(180))) }
+                    Log.write("auto: typed")
+                }
+            }
+
+            steps += 1
+            if !autoDry, Double.random(in: 0...1) < 0.45 {
+                autoSay("scrolling up to re-read")
+                Capture.scroll(-160)
+                try? await Task.sleep(nanoseconds: UInt64(Double.random(in: 0.5...1.1) * 1_000_000_000))
+                autoSay("scrolling back")
+                Capture.scroll(160)
+            }
+            if Auto.pauseEvery(steps) {
+                let idle = Double.random(in: 40...90)
+                Log.write("auto: idle \(Int(idle))s")
+                autoSay("idling \(Int(idle))s")
+                state.autoWait = "\(Int(idle))s"
+                try? await Task.sleep(nanoseconds: UInt64(idle * 1_000_000_000))
+                state.autoWait = ""
+            }
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            guard auto, g == gen else { return }
+
+            autoSay("advancing")
+            if let nxt = Auto.button(boxes, Auto.advance) {
+                Capture.click(pixel: jitter(nxt), scale: scale)
+                try? await Task.sleep(nanoseconds: 1_300_000_000)
+            } else if let sub2 = Auto.button(boxes, Auto.submit) {
+                Log.write("auto: section end")
+                set(g, "auto: section end — submit?")
+                autoStop("section end")
+                return
+            }
+        }
+        if steps >= config.autoMaxSteps { autoStop("step limit") }
     }
 
     private func present(_ r: Reply, _ labels: [(String, CGRect)], _ g: Int, _ cfg: Config, cached: Bool) async {

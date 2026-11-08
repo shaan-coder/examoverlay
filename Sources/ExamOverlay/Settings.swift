@@ -29,6 +29,7 @@ final class PrefsModel: ObservableObject {
 @Published var maxTokens = 300
 @Published var temperature = 0.1
 @Published var attachImage = true
+    @Published var axText = true
 @Published var useCache = true
 @Published var autoSave = false
 @Published var display = Display.ghost
@@ -52,6 +53,7 @@ fallbackApiKey = c.fallbackApiKey
 maxTokens = c.maxTokens
 temperature = c.temperature
 attachImage = c.attachImage
+        axText = c.axText
 useCache = c.useCache
 autoSave = c.autoSave
 display = c.display
@@ -76,6 +78,7 @@ o["fallbackApiKey"] = fallbackApiKey
 o["maxTokens"] = maxTokens
 o["temperature"] = temperature
 o["attachImage"] = attachImage
+        o["axText"] = axText
 o["useCache"] = useCache
 o["autoSave"] = autoSave
 o["display"] = display.rawValue
@@ -145,6 +148,8 @@ row("Eliminate two options", "⌃⌥⌘E")
                 row("Explain current answer", "⌃⌥⌘G")
                 row("Review session", "⌃⌥⌘Y")
                 row("Build study report", "⌃⌥⌘T")
+                row("Autopilot start / stop", "⌃⌥⌘A")
+                row("Dry run (no clicks)", "⌃⌥⌘D")
                 row("Ask", "⌃⌥⌘P")
 row("Panic — hide and cancel", "⌃⌥⌘X")
 }
@@ -188,7 +193,8 @@ HStack { Text("Reveal max"); Slider(value: $m.revealMax, in: 0...4); Text(String
 private var advanced: some View {
 Form {
 TextField("OCR languages", text: $m.ocrLanguages)
-Toggle("Attach screenshot to requests", isOn: $m.attachImage)
+Toggle("Read accessibility tree (faster, exact)", isOn: $m.axText)
+            Toggle("Attach screenshot to requests", isOn: $m.attachImage)
 Toggle("Use answer cache", isOn: $m.useCache)
 Section {
 Button("Run doctor") {

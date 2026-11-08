@@ -82,6 +82,11 @@ struct Config {
  var confidenceFloor = 0.55
  var showHints = true
  var onboarded = false
+    var autoMaxSteps = 40
+    var axText = true
+    var autoWrongChance = 0.25
+    var autoDwellScale = 1.0
+    var autoStopConfidence = 0.4
     var clickThrough = true
     var hideStatusItem = true
 
@@ -119,6 +124,11 @@ else if let v = o["letterMode"] as? Bool { c.display = v ? .ghost : .full }
 if let v = o["confidenceFloor"] as? Double { c.confidenceFloor = v }
 if let v = o["showHints"] as? Bool { c.showHints = v }
 if let v = o["onboarded"] as? Bool { c.onboarded = v }
+        if let v = o["autoMaxSteps"] as? Int { c.autoMaxSteps = v }
+        if let v = o["axText"] as? Bool { c.axText = v }
+        if let v = o["autoWrongChance"] as? Double { c.autoWrongChance = v }
+        if let v = o["autoDwellScale"] as? Double { c.autoDwellScale = v }
+        if let v = o["autoStopConfidence"] as? Double { c.autoStopConfidence = v }
         if let v = o["clickThrough"] as? Bool { c.clickThrough = v }
         if let v = o["hideStatusItem"] as? Bool { c.hideStatusItem = v }
         return c
