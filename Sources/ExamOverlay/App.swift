@@ -23,7 +23,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var scale: CGFloat = 2
     private var lastImage: CGImage?
     private var lastText = ""
+    private var batchRows: [Model.BatchItem] = []
+    private var batchIndex = -1
+    private var pinnedText = ""
+    private var sessionStart = Date()
+    private var qStart = Date()
+    private var clock: Timer?
+    private var prevText = ""
     private var lastTarget: CGRect?
+    private var targetStack: [CGRect] = []
+    private var wizardShown = false
     private var lastLabels: [(String, CGRect)] = []
 
     private var task: Task<Void, Never>?
@@ -32,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stream = ""
     private var format = Format.auto
     private var previousApp: NSRunningApplication?
-    private var letterMode = false
+    private var display = Display.ghost
     private var savedFrame: NSRect?
     private var shiftDown = false
     private var shiftUsed = false
@@ -40,9 +49,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         Config.seedIfMissing(bundled: Bundle.main.url(forResource: "defaults", withExtension: "json"))
         config = Config.load()
-        letterMode = config.letterMode
-        state.letterMode = letterMode
+        display = config.display
+        state.display = display
         Log.write("=== launch \(Bundle.main.bundlePath) translocated=\(Doctor.translocated) ===")
+        startObservers()
+        startClock()
+        if !config.onboarded, !wizardShown {
+            wizardShown = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                WizardWindow.show { self.config.onboarded = true }
+            }
+        }
 
         buildPanel()
         buildMenu()
@@ -62,8 +79,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var hint: String {
-        letterMode ? "8 solve | J fix | right-shift show/hide | ^⌥⌘L normal"
-                   : "S solve | P ask | X panic | J fix | K chrome | ^⌥⌘L letter mode"
+        switch display {
+        case .ghost: return "8 solve · J next · ⇧ tap hide · ^⌥⌘L denser"
+        case .compact: return "S solve · J next · ⌘Z undo · ^⌥⌘L fuller"
+        case .full: return "S solve · P ask · ⌘C copy · ⌘Z undo · ^⌥⌘L ghost"
+        }
     }
 
     private func installMonitors() {
@@ -89,13 +109,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let v = NSScreen.main?.visibleFrame {
             panel.setFrame(NSRect(x: v.maxX - 464, y: v.maxY - 224, width: 440, height: 200), display: false)
         }
-        if letterMode {
+        if display == .ghost {
             if let r = corner(64, 48) { panel.setFrame(r, display: false) }
             panel.ignoresMouseEvents = true
         } else {
             panel.ignoresMouseEvents = config.clickThrough
         }
         panel.orderFrontRegardless()
+    }
+
+    private func startObservers() {
+        NotificationCenter.default.addObserver(
+            forName: .examOverlayConfigChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.reloadConfig() }
+        }
     }
 
     private func buildMenu() {
@@ -108,7 +135,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         add("Ask…", #selector(doAsk))
         add("Save question", #selector(doSave))
         m.addItem(.separator())
-        add("Letter mode", #selector(doLetter))
+        add("Cycle density", #selector(doCycle))
+        add("Preferences…", #selector(doPrefs))
+        add("Setup…", #selector(doWizard))
+        add("Review session", #selector(doReview))
+        add("Scan whole page", #selector(doBatch))
+        add("Eliminate two", #selector(doEliminate))
+        add("Explain answer", #selector(doExplain))
+        add("Provider health", #selector(doHealth))
+        m.addItem(.separator())
+        add("Check for updates", #selector(doUpdate))
+        add("About ExamOverlay", #selector(doAbout))
+        add("Export log", #selector(doLog))
         add("Cycle format", #selector(doFormat))
         add("Toggle vision", #selector(doVision))
         add("Status / doctor", #selector(doDoctor))
@@ -123,24 +161,151 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         item.menu = m
         statusItem = item
-        statusItem?.isVisible = !(config.hideStatusItem && letterMode)
+        statusItem?.isVisible = !(config.hideStatusItem && display == .ghost)
     }
 
     @objc private func doSolve() { solve(nil) }
     @objc private func doClipboard() { clipboard() }
     @objc private func doAsk() { openPrompt() }
     @objc private func doSave() { saveOnly() }
-    @objc private func doLetter() { setLetter(!letterMode) }
+        @objc private func doCycle() { setDisplay(display.next) }
+    @objc private func doPrefs() { PrefsWindow.show() }
+    @objc private func doWizard() { WizardWindow.show { } }
+    @objc private func doUndo() { undo() }
+        private func eliminate() {
+        guard !state.busy else { return }
+        gen += 1
+        let g = gen
+        let cfg = config
+        let text = lastText
+        task = Task { @MainActor in
+            state.busy = true
+            do {
+                let l = try await Model.eliminate(text, image: lastImage, cfg)
+                guard g == gen else { return }
+                state.eliminated = l
+                set(g, l.isEmpty ? "no elimination" : "✗ " + l.joined(separator: "  "))
+            } catch {
+                if Task.isCancelled { return }
+                set(g, describe(error))
+            }
+        }
+    }
+
+    private func explain() {
+        guard !state.busy, !state.full.isEmpty else { return }
+        gen += 1
+        let g = gen
+        let cfg = config
+        let text = lastText
+        let pick = state.letter
+        task = Task { @MainActor in
+            state.busy = true
+            do {
+                let r = try await Model.ask("In two sentences, why is \(pick) correct here?", text, lastImage, cfg)
+                guard g == gen else { return }
+                state.full = r
+                set(g, r)
+            } catch {
+                if Task.isCancelled { return }
+                set(g, describe(error))
+            }
+        }
+    }
+
+    private func batchMove(_ d: Int) {
+        guard !batchRows.isEmpty else { return }
+        batchIndex = min(batchRows.count - 1, max(0, batchIndex + d))
+        state.text = batchRows.enumerated().map { i, r in
+            (i == batchIndex ? "▶ " : "  ") + "\(r.letter). \(r.answer.prefix(38))"
+        }.joined(separator: "\n")
+        panel.orderFrontRegardless()
+    }
+
+    private func batchClick() {
+        guard batchIndex >= 0, batchIndex < batchRows.count else {
+            flash("nothing selected"); return
+        }
+        let r = batchRows[batchIndex]
+        guard let t = Resolve.target(answer: r.answer, letter: r.letter, boxes: boxes) else {
+            flash("no match"); return
+        }
+        if let prev = lastTarget { targetStack.append(prev) }
+        lastTarget = t.box
+        Capture.click(pixel: jitter(t.box), scale: scale)
+        Log.write("click: batch \(r.letter)")
+    }
+
+    private func batch() {
+        guard !state.busy else { return }
+        gen += 1
+        let g = gen
+        let cfg = config
+        let text = lastText
+        task = Task { @MainActor in
+            state.busy = true
+            do {
+                let items = try await Model.batch(text, image: lastImage, cfg)
+                guard g == gen else { return }
+                batchRows = items
+                batchIndex = -1
+                if items.isEmpty { set(g, "no questions found"); return }
+                let head = items.prefix(4)
+                    .map { "\($0.letter). \($0.answer.prefix(40))" }
+                    .joined(separator: "\n")
+                set(g, "\(items.count) found\n" + head)
+            } catch {
+                if Task.isCancelled { return }
+                set(g, describe(error))
+            }
+        }
+    }
+
+    @objc private func doReview() { ReviewWindow.show() }
+
+    @objc private func doBatch() { batch() }
+    @objc private func doEliminate() { eliminate() }
+    @objc private func doExplain() { explain() }
+    @objc private func doUpdate() { Update.check(quiet: false) }
+    @objc private func doAbout() {
+        let al = NSAlert()
+        al.messageText = "ExamOverlay 3.0"
+        al.informativeText = "Screen capture, OCR, and one key."
+        al.runModal()
+    }
+
+    @objc private func doLog() {
+        let p = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".examoverlay.log")
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "examoverlay.log"
+        guard panel.runModal() == .OK, let u = panel.url else { return }
+        try? FileManager.default.removeItem(at: u)
+        try? FileManager.default.copyItem(at: p, to: u)
+    }
+
+    @objc private func doHealth() {
+        Task { @MainActor in
+            let rows = await Health.shared.report()
+            let body = rows.isEmpty ? "No failures recorded."
+                : rows.map { "\($0.0): \($0.1)" }.joined(separator: "\n")
+            let al = NSAlert()
+            al.messageText = "Provider health"
+            al.informativeText = body
+            al.runModal()
+        }
+    }
+    @objc private func doCopy() { copyAnswer() }
     @objc private func doOpen() { NSWorkspace.shared.open(Archive.dir) }
     @objc private func doOpenConfig() { NSWorkspace.shared.open(Config.path) }
     @objc private func paneScreen() { Doctor.open(.screen) }
     @objc private func paneAX() { Doctor.open(.access) }
-    @objc private func doClearCache() { Cache.clear(); flash("cache cleared") }
+    @objc private func doClearCache() { Cache.clear(); Task { await history.clear() }; flash("cache + context cleared") }
     @objc private func doVision() { config.attachImage.toggle(); flash(config.attachImage ? "vision ON" : "vision off") }
     @objc private func doFormat() { format = format.next; flash("Format: \(format.rawValue)") }
     @objc private func doDoctor() {
         state.asked = nil
-        if letterMode { setLetter(false) }
+        if display == .ghost { setDisplay(.full) }
         flash(Doctor.summary())
     }
 
@@ -153,16 +318,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func register() {
         let mod = UInt32(controlKey | optionKey | cmdKey)
         keys.clear()
-        if letterMode {
-            keys.add(UInt32(kVK_ANSI_8), 0) { [weak self] in
-                Task { @MainActor in
-                    guard let self, !self.state.promptShown else { return }
-                    self.solve(nil)
-                }
+        keys.add(UInt32(kVK_ANSI_8), 0) { [weak self] in
+            Task { @MainActor in
+                guard let self, !self.state.promptShown else { return }
+                self.solve(nil)
             }
-        } else {
-            keys.add(UInt32(kVK_ANSI_S), mod) { [weak self] in Task { @MainActor in self?.solve(nil) } }
         }
+        keys.add(UInt32(kVK_ANSI_S), mod) { [weak self] in Task { @MainActor in self?.solve(nil) } }
         keys.add(UInt32(kVK_ANSI_P), mod) { [weak self] in Task { @MainActor in self?.openPrompt() } }
         keys.add(UInt32(kVK_ANSI_V), mod) { [weak self] in Task { @MainActor in self?.clipboard() } }
         keys.add(UInt32(kVK_ANSI_D), mod) { [weak self] in Task { @MainActor in self?.saveOnly() } }
@@ -176,7 +338,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         keys.add(UInt32(kVK_ANSI_L), mod) { [weak self] in
-            Task { @MainActor in guard let self else { return }; self.setLetter(!self.letterMode) }
+            Task { @MainActor in guard let self else { return }; self.setDisplay(self.display.next) }
+        }
+        keys.add(UInt32(kVK_ANSI_Z), mod) { [weak self] in
+            Task { @MainActor in self?.undo() }
+        }
+        keys.add(UInt32(kVK_ANSI_C), mod) { [weak self] in
+            Task { @MainActor in self?.copyAnswer() }
+        }
+        keys.add(UInt32(kVK_ANSI_Comma), mod) { [weak self] in
+            Task { @MainActor in self?.doPrefs() }
+        }
+        keys.add(UInt32(kVK_UpArrow), mod) { [weak self] in Task { @MainActor in self?.batchMove(-1) } }
+        keys.add(UInt32(kVK_DownArrow), mod) { [weak self] in Task { @MainActor in self?.batchMove(1) } }
+        keys.add(UInt32(kVK_Return), mod) { [weak self] in Task { @MainActor in self?.batchClick() } }
+        keys.add(UInt32(kVK_ANSI_B), mod) { [weak self] in Task { @MainActor in self?.batch() } }
+        keys.add(UInt32(kVK_ANSI_E), mod) { [weak self] in Task { @MainActor in self?.eliminate() } }
+        keys.add(UInt32(kVK_ANSI_G), mod) { [weak self] in Task { @MainActor in self?.explain() } }
+        keys.add(UInt32(kVK_ANSI_Y), mod) { [weak self] in Task { @MainActor in self?.doReview() } }
+        keys.add(UInt32(kVK_ANSI_U), mod) { [weak self] in
+            Task { @MainActor in self?.togglePin() }
         }
         keys.add(UInt32(kVK_ANSI_X), mod) { [weak self] in Task { @MainActor in self?.panic() } }
         keys.add(UInt32(kVK_ANSI_R), mod) { [weak self] in Task { @MainActor in self?.reveal() } }
@@ -189,26 +370,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return NSRect(x: v.maxX - w - 14, y: v.minY + 14, width: w, height: h)
     }
 
-    private func setLetter(_ on: Bool) {
-        guard on != letterMode else { return }
-        letterMode = on
-        state.letterMode = on
-        state.full = ""
-        state.text = ""
+    private func setDisplay(_ d: Display) {
+        guard d != display else { return }
+        display = d
+        config.display = d
         state.dim = false
-        if on {
-            savedFrame = panel.frame
-            if let r = corner(64, 48) { panel.setFrame(r, display: true) }
-            panel.ignoresMouseEvents = true
-            if config.hideStatusItem { statusItem?.isVisible = false }
-        } else {
-            if let r = savedFrame { panel.setFrame(r, display: true) }
-            panel.ignoresMouseEvents = config.clickThrough
-            statusItem?.isVisible = true
-            state.text = hint
+        if d == .ghost { state.text = ""; state.full = "" }
+        applyDisplay()
+    }
+
+    private func applyDisplay() {
+        state.display = display
+        state.hint = config.showHints ? hint : ""
+        panel.ignoresMouseEvents = display == .ghost
+        statusItem?.isVisible = !(config.hideStatusItem && display == .ghost)
+        if let r = corner(display.size.width, display.size.height) {
+            panel.setFrame(r, display: true)
         }
         panel.orderFrontRegardless()
         register()
+    }
+
+    private func reloadConfig() {
+        config = Config.load()
+        display = config.display
+        applyDisplay()
     }
 
     private func toggleShow() {
@@ -230,8 +416,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func reveal() {
         if !state.full.isEmpty, state.text != state.full {
             state.text = state.full
-            if letterMode, let r = corner(380, 180) { panel.setFrame(r, display: true) }
-        } else if letterMode, let r = corner(64, 48) {
+            if display == .ghost, let r = corner(380, 180) { panel.setFrame(r, display: true) }
+        } else if display == .ghost, let r = corner(64, 48) {
             state.text = ""
             panel.setFrame(r, display: true)
         }
@@ -240,7 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func openPrompt() {
         previousApp = NSWorkspace.shared.frontmostApplication
-        if letterMode, let r = corner(440, 200) {
+        if display == .ghost, let r = corner(440, 200) {
             savedFrame = panel.frame
             panel.setFrame(r, display: true)
         }
@@ -270,7 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "cache": doClearCache()
         case "clear": state.text = ""; state.full = ""; panel.orderFrontRegardless()
         case "format": doFormat()
-        case "letter": setLetter(!letterMode)
+        case "letter": setDisplay(display.next)
         case "vision": doVision()
         case "doctor": doDoctor()
         case "config": NSWorkspace.shared.open(Config.path)
@@ -292,7 +478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func endPrompt() {
-        if letterMode {
+        if display == .ghost {
             if let r = savedFrame ?? corner(64, 48) { panel.setFrame(r, display: true) }
             panel.ignoresMouseEvents = true
         }
@@ -332,6 +518,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.cached = false
         state.dim = false
         state.text = "…"
+        state.letter = ""
+        state.shaky = false
         panel.orderFrontRegardless()
         task = Task { @MainActor in
             if let q = ask { await self.doAsk(g, q) } else { await self.doSolve(g, clipboard) }
@@ -352,6 +540,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scale = shot.scale
         lastImage = shot.image
         let text = ocr.trimmingCharacters(in: .whitespacesAndNewlines)
+        prevText = lastText
         lastText = text
         Log.write("grab \(shot.image.width)x\(shot.image.height) boxes=\(bx.count) chars=\(text.count)")
         try? text.write(to: URL(fileURLWithPath: "/tmp/examoverlay-ocr.txt"), atomically: true, encoding: .utf8)
@@ -375,12 +564,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let labels = Resolve.labels(boxes)
         lastLabels = labels
         let hint = format == .auto ? "" : "\n\nFormat hint: \(format.rawValue)"
-        let prompt = text + hint
+        var body = text.count > 1500
+            ? String(text.prefix(400)) + "\n...\n" + String(text.suffix(1100))
+            : text
+        if !pinnedText.isEmpty {
+            body = "Pinned stimulus:\n" + pinnedText + "\n...\n" + String(text.suffix(900))
+        }
+        let prompt = body + hint
+        qStart = Date()
         let wantImage = cfg.attachImage || text.count < 200
-        let vision = wantImage ? image.map { Capture.downscale($0, maxWidth: 1100) } : nil
+        let vision = wantImage ? image.map { Capture.downscale($0, maxWidth: 800) } : nil
         Log.write("solve labels=\(labels.map { $0.0 }.joined()) image=\(vision != nil) chars=\(text.count)")
+        if overlap(prevText, text) < 0.3 { await history.clear() }
+        let hist = await history.block()
+        if !hist.isEmpty { Log.write("hist \(hist.count) chars") }
 
-        let key = Cache.key(prompt, cfg.model)
+        let key = Cache.key(prompt + hist, cfg.model)
         if cfg.useCache, let hit = Cache.get(key) {
             await present(parse(hit), labels, g, cfg, cached: true)
             return
@@ -390,14 +589,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let n = max(1, cfg.consensusSamples)
         if n == 1 {
             do {
-                let raw = try await timeout(40) { try await Model.solve(prompt, image: vision, cfg) }
+                let raw = try await timeout(120) { try await Model.solve(prompt, image: vision, cfg, history: hist) }
                 guard g == gen else { return }
                 Log.write("raw \(raw.prefix(300))")
                 replies = [parse(raw)]
             } catch {
                 if Task.isCancelled { return }
                 Log.write("model error: \(error)")
-                set(g, "Error: \(error)")
+                set(g, describe(error))
                 return
             }
         } else {
@@ -405,7 +604,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for _ in 0..<n {
                 tasks.append(Task {
                     do {
-                        let raw = try await self.timeout(40) { try await Model.solve(prompt, image: vision, cfg) }
+                        let raw = try await self.timeout(120) { try await Model.solve(prompt, image: vision, cfg, history: hist) }
                         return self.parse(raw)
                     } catch { return nil }
                 })
@@ -414,7 +613,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard g == gen else { return }
         }
 
-        let valid = replies.filter { !$0.answer.isEmpty || $0.letter != nil }
+        let valid = replies.filter { !$0.answer.isEmpty || $0.letter != nil || !($0.reason ?? "").isEmpty }
         guard var chosen = valid.first else { set(g, "Error: empty response"); return }
         if valid.count > 1 {
             var tally: [String: Int] = [:]
@@ -442,7 +641,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !noScreen {
             guard let r = await grab(g) else { return }
             c0 = r.text
-            i0 = cfg.attachImage ? Capture.downscale(r.image, maxWidth: 1100) : nil
+            i0 = cfg.attachImage ? Capture.downscale(r.image, maxWidth: 800) : nil
         }
         let ctx = c0
         let image = i0
@@ -473,13 +672,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             set(g, raw)
         } catch {
             if Task.isCancelled { return }
-            set(g, "Error: \(error)")
+            set(g, describe(error))
         }
     }
 
     private func present(_ r: Reply, _ labels: [(String, CGRect)], _ g: Int, _ cfg: Config, cached: Bool) async {
         state.cached = cached
-        if let img = lastImage, letterMode { sampleContrast(img) }
+        if let img = lastImage, display == .ghost { sampleContrast(img) }
         let hi = max(cfg.revealMin, cfg.revealMax)
         try? await Task.sleep(nanoseconds: UInt64(Double.random(in: cfg.revealMin...hi) * 1_000_000_000))
         guard g == gen else { return }
@@ -491,20 +690,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let target = r.mode == "mcq" ? Resolve.target(answer: r.answer, letter: letter, boxes: boxes) : nil
         if letter == nil, let t = target { letter = Resolve.letter(for: t.box, labels: labels) }
 
-        var full = r.answer
+        var full = r.answer.isEmpty ? (r.reason ?? "") : r.answer
         if let reason = r.reason, !reason.isEmpty { full += "\n\(reason)" }
         if let c = r.confidence { full += "  [\(Int(c * 100))%]" }
         state.full = full
         Log.write("present mode=\(r.mode) letter=\(letter ?? "-") answer=\(r.answer.prefix(60)) target=\(target?.tier ?? "none")")
 
-        if letterMode {
-            if r.mode == "mcq" { set(g, letter ?? "?") }
-            else { set(g, String(r.answer.prefix(18))) }
+        state.letter = r.mode == "mcq" ? (letter ?? "?") : String(r.answer.prefix(3))
+        state.shaky = (r.confidence ?? 1) < cfg.confidenceFloor
+        if display == .ghost {
+            set(g, state.letter)
+        } else if display == .compact {
+            set(g, letter.map { "\($0)  \(r.answer.prefix(70))" } ?? String(r.answer.prefix(80)))
         } else {
             set(g, full.isEmpty ? "(empty) \(r.raw.prefix(120))" : full)
         }
 
-        AnswerLog.record(question: lastText, letter: letter ?? "-", answer: r.answer,
+        AnswerLog.record(question: String(lastText.suffix(400)), letter: letter ?? "-", answer: r.answer,
                          confidence: r.confidence ?? 0, tier: target?.tier ?? "none")
 
         guard r.mode == "mcq", let t = target else {
@@ -513,7 +715,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         lastTarget = t.box
         Log.write("click: \(t.tier) \(t.text.prefix(40))")
+        if let prev = lastTarget { targetStack.append(prev) }
         Capture.click(pixel: jitter(t.box), scale: scale)
+        await history.add(lastText, letter ?? "", r.answer, r.reason ?? "")
 
         if cfg.autoSave { Archive.save(question: lastText, answer: full, image: lastImage) }
     }
@@ -526,6 +730,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let px = CGRect(x: (r.minX - o.x) * scale, y: (top - o.y) * scale,
                         width: r.width * scale, height: r.height * scale)
         state.onDark = Capture.luminance(img, in: px) < 118
+    }
+
+    private func overlap(_ a: String, _ b: String) -> Double {
+        let x = Set(a.lowercased().split(separator: " ").filter { $0.count > 3 })
+        guard !x.isEmpty else { return 1 }
+        let y = Set(b.lowercased().split(separator: " ").filter { $0.count > 3 })
+        return Double(x.intersection(y).count) / Double(x.count)
+    }
+
+    private func undo() {
+        guard let b = targetStack.popLast() else { flash("nothing to undo"); return }
+        Capture.click(pixel: jitter(b), scale: scale)
+        Log.write("click: undo")
+    }
+
+    private func copyAnswer() {
+        guard !state.full.isEmpty else { flash("nothing to copy"); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(state.full, forType: .string)
+        flash("copied")
+    }
+
+    private func describe(_ e: Error) -> String {
+        guard case ModelError.http(let code, let body) = e else {
+            return "\(e) — press ⌃⌥⌘S to retry"
+        }
+        switch code {
+        case 401, 402: return "Key rejected (\(code)) — check preferences"
+        case 429: return "Rate-limited — wait a few seconds, then ⌃⌥⌘S"
+        case 503: return "Provider busy — press ⌃⌥⌘S to retry"
+        default: return "HTTP \(code) — \(body.prefix(70))"
+        }
+    }
+
+    private func togglePin() {
+        if pinnedText.isEmpty {
+            guard lastText.count > 60 else { flash("nothing to pin"); return }
+            pinnedText = String(lastText.prefix(700))
+            flash("stimulus pinned")
+        } else {
+            pinnedText = ""
+            flash("stimulus unpinned")
+        }
+        Log.write("pin \(pinnedText.isEmpty ? "off" : "on")")
+    }
+
+    private func startClock() {
+        clock?.invalidate()
+        clock = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let sec = Int(Date().timeIntervalSince(self.sessionStart))
+                let q = Int(Date().timeIntervalSince(self.qStart))
+                self.state.elapsed = String(format: "%d:%02d · %ds", sec / 60, sec % 60, q)
+            }
+        }
     }
 
     private func jitter(_ b: CGRect) -> CGPoint {

@@ -6,7 +6,7 @@ enum ModelError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .timeout: return "timed out"
-        case .http(let c, let b): return "HTTP \(c): \(b.prefix(160))"
+        case .http(let c, let b): return "HTTP \(c): \(b.prefix(600))"
         case .empty: return "empty response"
         }
     }
@@ -26,17 +26,97 @@ enum Model {
 
     static let askSystem = "You are a concise exam helper. Answer in the language asked. No preamble."
 
-    static func solve(_ text: String, image: CGImage?, _ c: Config) async throws -> String {
-        try await once(solveSystem, content(text, image), c, json: true)
+    static func solve(_ text: String, image: CGImage?, _ c: Config, history: String = "") async throws -> String {
+        let u = content(history + text, image)
+        let skipPrimary = !(await Health.shared.usable(c.endpoint))
+        var last: Error?
+        for attempt in 0..<2 where !skipPrimary {
+            await Budget.shared.reserve(text.count / 4 + history.count / 4 + (image == nil ? 0 : 1100) + c.maxTokens)
+            do {
+                let r = try await once(solveSystem, u, c, json: true)
+                await Health.shared.mark(c.endpoint, ok: true)
+                return r
+            }
+            catch {
+                last = error
+                if !retryable(error) { await Health.shared.mark(c.endpoint, ok: false) }
+                guard retryable(error), attempt < 2 else { break }
+                let wait = retryAfter(error)
+                Log.write("throttled, waiting \(Int(wait))s")
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
+        }
+        guard let fb = fallback(c) else { throw last ?? ModelError.empty }
+        Log.write("primary failed (\(last.map { "\($0)" } ?? "?")), trying fallback \(fb.model)")
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        do {
+            let r = try await once(solveSystem, u, fb, json: true)
+            await Health.shared.mark(fb.endpoint, ok: true)
+            return stripJSON(r)
+        } catch {
+            await Health.shared.mark(fb.endpoint, ok: false)
+            throw error
+        }
+    }
+
+    private static func retryable(_ e: Error) -> Bool {
+        if case ModelError.http(let c, _) = e { return c == 429 || c == 503 }
+        return false
+    }
+
+    private static func retryAfter(_ e: Error) -> Double {
+        if case ModelError.http(_, let b) = e,
+           let r = b.range(of: "try again in") {
+            let tail = b[r.upperBound...].prefix(12)
+            let digits = tail.prefix { $0.isNumber || $0 == "." }
+            if let v = Double(digits) { return min(max(v + 0.5, 1), 20) }
+        }
+        return 9
+    }
+
+    private static func fallback(_ c: Config) -> Config? {
+        guard let e = c.fallbackEndpoint, !c.fallbackModel.isEmpty, !c.fallbackApiKey.isEmpty else { return nil }
+        var f = c
+        f.endpoint = e
+        f.model = c.fallbackModel
+        f.apiKey = c.fallbackApiKey
+        f.consensusSamples = 1
+        f.isFallback = true
+        return f
     }
 
     static func ask(_ q: String, _ ctx: String, _ image: CGImage?, _ c: Config) async throws -> String {
-        try await once(askSystem, content(askText(q, ctx), image), c, json: false)
+        let u = content(askText(q, ctx), image)
+        await Budget.shared.reserve(q.count / 4 + ctx.count / 4 + (image == nil ? 0 : 1600) + c.maxTokens)
+        do {
+            return try await once(askSystem, u, c, json: false)
+        } catch {
+            guard let fb = fallback(c) else { throw error }
+            Log.write("ask primary failed (\(error)), trying fallback \(fb.model)")
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            return try await once(askSystem, u, fb, json: false)
+        }
     }
 
     static func askStream(_ q: String, _ ctx: String, _ image: CGImage?, _ c: Config,
                           _ onPiece: @escaping (String) -> Void) async throws -> String {
-        var req = try build(askSystem, content(askText(q, ctx), image), c, json: false)
+        let u = content(askText(q, ctx), image)
+        await Budget.shared.reserve(q.count / 4 + ctx.count / 4 + (image == nil ? 0 : 1600) + c.maxTokens)
+        do {
+            return try await stream(askSystem, u, c, onPiece)
+        } catch {
+            guard let fb = fallback(c) else { throw error }
+            Log.write("ask stream failed (\(error)), trying fallback \(fb.model)")
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            let out = try await once(askSystem, u, fb, json: false)
+            onPiece(out)
+            return out
+        }
+    }
+
+    private static func stream(_ sys: String, _ u: Any, _ c: Config,
+                               _ onPiece: @escaping (String) -> Void) async throws -> String {
+        var req = try build(sys, u, c, json: false)
         var body = (try JSONSerialization.jsonObject(with: req.httpBody ?? Data()) as? [String: Any]) ?? [:]
         body["stream"] = true
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -58,7 +138,42 @@ enum Model {
             out += piece
             onPiece(piece)
         }
+        guard !out.isEmpty else { throw ModelError.empty }
         return out
+    }
+
+    struct BatchItem {
+        let n: Int
+        let letter: String
+        let answer: String
+    }
+
+    static func batch(_ text: String, image: CGImage?, _ c: Config) async throws -> [BatchItem] {
+        let sys = """
+        Find every numbered question visible. For each, pick the best option.
+        Return JSON only: {"items":[{"n":1,"letter":"B","answer":"exact option text"}]}
+        """
+        let u = content(text, image)
+        await Budget.shared.reserve(text.count / 4 + (image == nil ? 0 : 1600) + 500)
+        let raw = stripJSON(try await once(sys, u, c, json: true))
+        guard let d = raw.data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let arr = o["items"] as? [[String: Any]] else { return [] }
+        return arr.compactMap { i in
+            guard let n = i["n"] as? Int, let l = i["letter"] as? String else { return nil }
+            return BatchItem(n: n, letter: l.uppercased(), answer: i["answer"] as? String ?? "")
+        }.sorted { $0.n < $1.n }
+    }
+
+    static func eliminate(_ text: String, image: CGImage?, _ c: Config) async throws -> [String] {
+        let sys = "Return JSON only: {\"eliminate\":[\"A\",\"C\"]}. Choose the two least likely options."
+        let u = content(text, image)
+        await Budget.shared.reserve(text.count / 4 + (image == nil ? 0 : 1600) + 200)
+        let raw = stripJSON(try await once(sys, u, c, json: true))
+        guard let d = raw.data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let arr = o["eliminate"] as? [String] else { return [] }
+        return Array(arr.map { $0.uppercased() }.prefix(3))
     }
 
     private static func askText(_ q: String, _ ctx: String) -> String {
@@ -70,6 +185,11 @@ enum Model {
         let note = "\n\nA screenshot is attached. Read any map, chart, cartoon or document in it; the OCR text may be incomplete."
         return [["type": "text", "text": text + note],
                 ["type": "image_url", "image_url": ["url": "data:image/png;base64,\(png.base64EncodedString())"]]]
+    }
+
+    private static func stripJSON(_ s: String) -> String {
+        guard let a = s.firstIndex(of: "{"), let b = s.lastIndex(of: "}"), a < b else { return s }
+        return String(s[a...b])
     }
 
     private static func once(_ sys: String, _ u: Any, _ c: Config, json: Bool) async throws -> String {
@@ -93,16 +213,27 @@ enum Model {
     private static func build(_ sys: String, _ u: Any, _ c: Config, json: Bool) throws -> URLRequest {
         var req = URLRequest(url: c.endpoint)
         req.httpMethod = "POST"
-        req.timeoutInterval = 40
+        req.timeoutInterval = c.isFallback ? 14 : 40
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(c.apiKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("curl/8.7.1", forHTTPHeaderField: "User-Agent")
         var body: [String: Any] = [
             "model": c.model,
             "temperature": c.consensusSamples > 1 ? max(c.temperature, 0.5) : c.temperature,
             "max_tokens": c.maxTokens,
             "messages": [["role": "system", "content": sys], ["role": "user", "content": u]]
         ]
-        if json { body["response_format"] = ["type": "json_object"] }
+        if json {
+            body["response_format"] = ["type": "json_object"]
+        }
+        if c.endpoint.host?.contains("deepseek") == true {
+            if json {
+                body["thinking"] = ["type": "disabled"]
+                body["effort"] = "low"
+            }
+        } else {
+            body["reasoning_effort"] = "none"
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return req
     }

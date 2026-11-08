@@ -41,22 +41,47 @@ enum Format: String {
     }
 }
 
+enum Display: String {
+case ghost, compact, full
+var next: Display {
+switch self {
+case .ghost: return .compact
+case .compact: return .full
+case .full: return .ghost
+}
+}
+var size: CGSize {
+switch self {
+case .ghost: return CGSize(width: 56, height: 44)
+case .compact: return CGSize(width: 320, height: 92)
+case .full: return CGSize(width: 440, height: 220)
+}
+}
+}
+
 struct Config {
     var endpoint = URL(string: "https://api.deepseek.com/chat/completions")!
     var model = "deepseek-flash"
     var apiKey = ""
-    var maxTokens = 600
-    var attachImage = false
+    var fallbackEndpoint: URL?
+    var fallbackModel = ""
+    var fallbackApiKey = ""
+    var isFallback = false
+    var maxTokens = 1200
+    var attachImage = true
     var useCache = true
     var streamAsk = true
     var consensusSamples = 1
     var temperature = 0.1
     var autoSave = false
     var ocrLanguages = ["en-US", "es-ES"]
-    var revealMin = 1.0
-    var revealMax = 2.5
+    var revealMin = 0.6
+    var revealMax = 1.2
     var clickJitter = 0.15...0.40
-    var letterMode = true
+    var display = Display.ghost
+ var confidenceFloor = 0.55
+ var showHints = true
+ var onboarded = false
     var clickThrough = true
     var hideStatusItem = true
 
@@ -76,6 +101,9 @@ struct Config {
         if let v = o["endpoint"] as? String, let u = URL(string: v) { c.endpoint = u }
         if let v = o["model"] as? String { c.model = v }
         if let v = o["apiKey"] as? String { c.apiKey = v }
+        if let v = o["fallbackEndpoint"] as? String { c.fallbackEndpoint = URL(string: v) }
+        if let v = o["fallbackModel"] as? String { c.fallbackModel = v }
+        if let v = o["fallbackApiKey"] as? String { c.fallbackApiKey = v }
         if let v = o["maxTokens"] as? Int { c.maxTokens = v }
         if let v = o["attachImage"] as? Bool { c.attachImage = v }
         if let v = o["useCache"] as? Bool { c.useCache = v }
@@ -86,7 +114,11 @@ struct Config {
         if let v = o["ocrLanguages"] as? [String] { c.ocrLanguages = v }
         if let v = o["revealMin"] as? Double { c.revealMin = v }
         if let v = o["revealMax"] as? Double { c.revealMax = v }
-        if let v = o["letterMode"] as? Bool { c.letterMode = v }
+        if let v = o["display"] as? String, let d = Display(rawValue: v) { c.display = d }
+else if let v = o["letterMode"] as? Bool { c.display = v ? .ghost : .full }
+if let v = o["confidenceFloor"] as? Double { c.confidenceFloor = v }
+if let v = o["showHints"] as? Bool { c.showHints = v }
+if let v = o["onboarded"] as? Bool { c.onboarded = v }
         if let v = o["clickThrough"] as? Bool { c.clickThrough = v }
         if let v = o["hideStatusItem"] as? Bool { c.hideStatusItem = v }
         return c
@@ -239,6 +271,18 @@ enum AnswerLog {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("answers.jsonl")
     }()
+
+    static func entries(since: Date) -> [[String: Any]] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        let iso = ISO8601DateFormatter()
+        return text.split(separator: "\n").compactMap { line in
+            guard let d = line.data(using: .utf8),
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let t = o["t"] as? String, let date = iso.date(from: t), date > since
+            else { return nil }
+            return o
+        }
+    }
 
     static func record(question: String, letter: String, answer: String, confidence: Double, tier: String) {
         let obj: [String: Any] = [

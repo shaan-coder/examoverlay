@@ -30,10 +30,7 @@ enum Capture {
             $0.owningApplication?.processID == ProcessInfo.processInfo.processIdentifier
         }
         let scale = NSScreen.main?.backingScaleFactor ?? 2
-        let union = content.displays.reduce(CGRect.null) {
-            $0.union(CGRect(x: $1.frame.minX, y: $1.frame.minY,
-                            width: CGFloat($1.width) / scale, height: CGFloat($1.height) / scale))
-        }
+        let union = content.displays.reduce(CGRect.null) { $0.union($1.frame) }
         let w = Int(union.width * scale), h = Int(union.height * scale)
         guard w > 0, h > 0,
               let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
@@ -44,8 +41,8 @@ enum Capture {
         for d in content.displays {
             let filter = SCContentFilter(display: d, excludingWindows: own)
             let cfg = SCStreamConfiguration()
-            cfg.width = d.width
-            cfg.height = d.height
+            cfg.width = Int(CGFloat(d.width) * scale)
+            cfg.height = Int(CGFloat(d.height) * scale)
             cfg.showsCursor = false
             cfg.colorSpaceName = CGColorSpace.sRGB
             guard let img = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
